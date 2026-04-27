@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.exception import RequestValidationError
+from fastapi.exceptions import RequestValidationError
 from app.routes.apiTestAgent import router as api_test_agent_router
 from app.utils.database import engine, Base
 from app.utils.exceptional import (
@@ -24,7 +24,7 @@ async def on_startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-app.include_router(api_test_agent_router, prefix='/{API_BASE_NAME}/{API_VERSION}')
+app.include_router(api_test_agent_router, prefix=f'/{API_BASE_NAME}/{API_VERSION}')
 
 @app.get("/")
 async def root():
