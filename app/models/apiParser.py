@@ -62,7 +62,7 @@ class API(Base):
     tag = Column(String(100))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
-    swagger = relationship("SwaggerDocument", back_populates="apis")
+    swagger_documents = relationship("SwaggerDocument", back_populates="apis")
     parameters = relationship("APIParameter", back_populates="apis")
     responses = relationship("APIResponse", back_populates="apis")
     auth = relationship("APIAuth", back_populates="apis", uselist=False)
@@ -95,7 +95,7 @@ class APIParameter(Base):
     schema = Column(JSONB)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
-    api = relationship("API", back_populates="parameters")
+    apis = relationship("API", back_populates="parameters")
 
 
 # -------------------------
@@ -110,7 +110,7 @@ class APIResponse(Base):
     schema = Column(JSONB)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
-    api = relationship("API", back_populates="responses")
+    apis = relationship("API", back_populates="responses")
 
 
 # -------------------------
@@ -124,7 +124,7 @@ class APIAuth(Base):
     auth_type = Column(String(50))  # bearer, apiKey, oauth
     config = Column(JSONB)
 
-    api = relationship("API", back_populates="auth")
+    apis = relationship("API", back_populates="auth")
 
 
 # -------------------------
