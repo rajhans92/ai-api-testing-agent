@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.schemas.apiParser import (
     ProjectDetails,
+    ParserDetails
 )
 from app.services.handler import (
     get_api_parser_service,
@@ -29,4 +30,13 @@ async def get_project(project_id: int, apiParseService: APIParserService = Depen
         raise he
     except Exception as e:
         print("Error fetching project: ", str(e))
-        raise HTTPException(status_code=500, detail="Failed to fetch project")    
+        raise HTTPException(status_code=500, detail="Failed to fetch project")   
+
+@router.post("/parse-api-doc")
+async def parse_swagger(parserDetails: ParserDetails, apiParseService: APIParserService = Depends(get_api_parser_service)):
+    try:
+        swaggerData = apiParseService.parse_swagger(parserDetails.swagger_url, parserDetails.project_id)
+        return {"message": "Swagger parsed successfully"}
+    except Exception as e:
+        print("Error parsing swagger: ", str(e))
+        raise HTTPException(status_code=500, detail="Failed to parse swagger")
