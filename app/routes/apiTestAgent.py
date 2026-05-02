@@ -35,7 +35,7 @@ async def get_project(project_id: int, apiParseService: APIParserService = Depen
 @router.post("/parse-api-doc")
 async def parse_swagger(parserDetails: ParserDetails, apiParseService: APIParserService = Depends(get_api_parser_service)):
     try:
-        swaggerData = apiParseService.parse_swagger(parserDetails.swagger_url, parserDetails.project_id)
+        swaggerData = await apiParseService.parse_swagger(parserDetails.swagger_url, parserDetails.project_id)
         return {"message": "Swagger parsed successfully"}
     except Exception as e:
         print("Error parsing swagger: ", str(e))

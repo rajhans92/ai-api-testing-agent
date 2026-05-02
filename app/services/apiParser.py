@@ -10,7 +10,9 @@ from app.models.apiParser import (
 
 class APIParserService:
     def __init__(self, db_session):
+        self.enable_llm = False  # Toggle LLM-based inference
         self.db = db_session
+
 
     async def create_project(self, project_details):
         try:
@@ -79,6 +81,7 @@ class APIParserService:
         # 3. Authentication Handling
         # -------------------------------
         auth_schemes = self._extract_auth_schemes(swagger_json)
+        print(f"Extracted Auth Schemes: {auth_schemes}")
 
         # -------------------------------
         # 4. Parse APIs
@@ -103,6 +106,7 @@ class APIParserService:
                     description=details.get("description"),
                     tag=details.get("tags", [None])[0]
                 )
+                print(f"Parsing API: {method.upper()} {path}")
                 self.db.add(api)
                 self.db.flush()
 
@@ -129,6 +133,7 @@ class APIParserService:
                         type =schema.get("type") or param.get("type"),
                         schema =param.get("schema")
                     )
+                    print(f"  - Parameter: {param_name} (in: {param.get('in')}, type: {schema.get('type')})")
                     self.db.add(api_param)
 
                     # Index for dependency detection
@@ -162,6 +167,7 @@ class APIParserService:
                         type=schema.get("type"),
                         schema =resolved_schema
                     )
+                    print(f"  - Request Body: (content-type: {content_type}, type: {schema.get('type')})")
                     self.db.add(api_param)
 
                 # -------------------------------
@@ -215,7 +221,7 @@ class APIParserService:
                             schema=resolved_schema,
                             content_type=content_type
                         )
-
+                        print(f"  - Response: {status_code} (content-type: {content_type}, type: {resolved_schema.get('type')})")
                         self.db.add(api_response)
                 # -------------------------------
                 # Auth Attach
@@ -228,6 +234,8 @@ class APIParserService:
 
         dependencies = []
 
+        print(f"Schema Producers: {schema_producers}")
+        print(f"Parameter Index: {param_index}")
         # Schema-based dependency
         for schema_name, producers in schema_producers.items():
             consumers = param_index.get(schema_name.lower(), [])

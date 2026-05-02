@@ -1,3 +1,4 @@
+import requests
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional
 
