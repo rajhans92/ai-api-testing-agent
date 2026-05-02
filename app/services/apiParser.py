@@ -140,15 +140,19 @@ class APIParserService:
                 request_body = self._extract_request_body(details, swagger_json)
                 content = request_body.get("content", {})
 
-                for _, schema_info in content.items():
+                for content_type, schema_info in content.items():
                     schema = schema_info.get("schema", {})
 
                     ref = schema.get("$ref")
                     if ref:
                         schema_name = ref.split("/")[-1]
 
-                        # Consumer
+                        # Track dependency
                         param_index.setdefault(schema_name.lower(), []).append(api.id)
+                        # OPTIONAL: resolve schema manually
+                        resolved_schema = self._resolve_schema_ref(ref, swagger_json)
+                    else:
+                        resolved_schema = schema
 
                     api_param = APIParameter(
                         api_id=api.id,
@@ -156,7 +160,7 @@ class APIParserService:
                         location="body",
                         required=request_body.get("required", False),
                         type=schema.get("type"),
-                        schema =param.get("schema")
+                        schema =resolved_schema
                     )
                     self.db.add(api_param)
 
@@ -165,23 +169,54 @@ class APIParserService:
                 # -------------------------------
                 for status_code, response in details.get("responses", {}).items():
 
-                    api_response = APIResponse(
-                        api_id=api.id,
-                        status_code=status_code,
-                        description=response.get("description"),
-                    )
-                    self.db.add(api_response)
+                    content_map = self._extract_response_content(response)
 
-                    # Capture produced schemas
-                    content = response.get("content", {})
-                    for _, schema_info in content.items():
+                    for content_type, schema_info in content_map.items():
                         schema = schema_info.get("schema", {})
-                        ref = schema.get("$ref")
 
+                        # -------------------------------
+                        # Resolve $ref (if needed)
+                        # -------------------------------
+                        ref = schema.get("$ref")
                         if ref:
                             schema_name = ref.split("/")[-1]
-                            schema_producers.setdefault(schema_name, []).append(api.id)
+                            resolved_schema = self._resolve_schema_ref(ref, swagger_json)
 
+                            # Mark as producer
+                            schema_producers.setdefault(schema_name, []).append(api.id)
+                        else:
+                            resolved_schema = schema
+
+                        # -------------------------------
+                        # Handle array schemas
+                        # -------------------------------
+                        if resolved_schema.get("type") == "array":
+                            items = resolved_schema.get("items", {})
+                            item_ref = items.get("$ref")
+
+                            if item_ref:
+                                schema_name = item_ref.split("/")[-1]
+                                schema_producers.setdefault(schema_name, []).append(api.id)
+
+                        # -------------------------------
+                        # Extract nested refs (IMPORTANT)
+                        # -------------------------------
+                        refs = self._extract_refs(resolved_schema)
+                        for ref_name in refs:
+                            schema_producers.setdefault(ref_name, []).append(api.id)
+
+                        # -------------------------------
+                        # Store FULL response
+                        # -------------------------------
+                        api_response = APIResponse(
+                            api_id=api.id,
+                            status_code=status_code,
+                            description=response.get("description"),
+                            schema=resolved_schema,
+                            content_type=content_type
+                        )
+
+                        self.db.add(api_response)
                 # -------------------------------
                 # Auth Attach
                 # -------------------------------
@@ -318,4 +353,37 @@ class APIParserService:
                         }
                     }
                 }
+        return {}
+    
+    def _resolve_schema_ref(self, ref, swagger_json):
+        """
+        Resolve local $ref like:
+        #/components/schemas/User
+        """
+        parts = ref.strip("#/").split("/")
+        ref_obj = swagger_json
+
+        for part in parts:
+            ref_obj = ref_obj.get(part, {})
+
+        return ref_obj
+    
+  
+    def _extract_response_content(self, response):
+        """
+        Normalize Swagger2 and OpenAPI3 response formats
+        """
+        # OpenAPI 3
+        if "content" in response:
+            return response.get("content", {})
+
+        # Swagger 2
+        schema = response.get("schema")
+        if schema:
+            return {
+                "application/json": {
+                    "schema": schema
+                }
+            }
+
         return {}
