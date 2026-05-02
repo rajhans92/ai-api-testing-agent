@@ -96,10 +96,12 @@ class APIParserService:
                 api = API(
                     project_id=project_id,
                     swagger_id=swagger_doc.id,
+                    operation_id = details.get("operationId"),
                     path=path,
                     method=method.upper(),
                     summary=details.get("summary"),
                     description=details.get("description"),
+                    tag=details.get("tags", [None])[0]
                 )
                 self.db.add(api)
                 self.db.flush()
@@ -122,9 +124,10 @@ class APIParserService:
                     api_param = APIParameter(
                         api_id=api.id,
                         name=param_name,
-                        param_in=param.get("in"),
+                        location=param.get("in"),
                         required=param.get("required", False),
-                        data_type=schema.get("type") or param.get("type"),
+                        type =schema.get("type") or param.get("type"),
+                        schema =param.get("schema")
                     )
                     self.db.add(api_param)
 
@@ -134,7 +137,7 @@ class APIParserService:
                 # -------------------------------
                 # Request Body
                 # -------------------------------
-                request_body = details.get("requestBody", {})
+                request_body = self._extract_request_body(details, swagger_json)
                 content = request_body.get("content", {})
 
                 for _, schema_info in content.items():
@@ -150,9 +153,10 @@ class APIParserService:
                     api_param = APIParameter(
                         api_id=api.id,
                         name="body",
-                        param_in="body",
+                        location="body",
                         required=request_body.get("required", False),
-                        data_type=schema.get("type"),
+                        type=schema.get("type"),
+                        schema =param.get("schema")
                     )
                     self.db.add(api_param)
 
@@ -293,3 +297,25 @@ class APIParserService:
             }
 
         return auth_schemes
+    
+
+    def _extract_request_body(self, details, swagger_json):
+        """
+        Supports both OpenAPI3 and Swagger2
+        """
+        # OpenAPI 3
+        if "requestBody" in details:
+            return details.get("requestBody", {})
+
+        # Swagger 2 fallback
+        for param in details.get("parameters", []):
+            if param.get("in") == "body":
+                return {
+                    "required": param.get("required", False),
+                    "content": {
+                        "application/json": {
+                            "schema": param.get("schema", {})
+                        }
+                    }
+                }
+        return {}
