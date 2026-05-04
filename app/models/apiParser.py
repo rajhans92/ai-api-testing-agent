@@ -108,6 +108,7 @@ class APIResponse(Base):
     api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
     status_code = Column(String(10))
     schema = Column(JSONB)
+    content_type = Column(String(50))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
     apis = relationship("API", back_populates="responses")
@@ -136,6 +137,7 @@ class APIDependency(Base):
     id = Column(Integer, primary_key=True, index=True)
     source_api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
     target_api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
+    dependency_type = Column(String(50))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
     source_api = relationship(
