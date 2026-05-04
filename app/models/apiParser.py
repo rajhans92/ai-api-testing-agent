@@ -109,6 +109,7 @@ class APIResponse(Base):
     status_code = Column(String(10))
     schema = Column(JSONB)
     content_type = Column(String(50))
+    description = Column(Text)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
     apis = relationship("API", back_populates="responses")

@@ -84,7 +84,7 @@ class APIParserService:
         # -------------------------------
         swagger_doc = SwaggerDocument(
             project_id=project_id,
-            version=version,
+            version=version, # get version from database. add +1 for increment
             raw_json=swagger_json
         )
         self.db.add(swagger_doc)
@@ -189,18 +189,29 @@ class APIParserService:
 
                     content_map = self._extract_response_content(response)
 
+                    # Handle responses without schema/content
+                    if not content_map:
+                        api_response = APIResponse(
+                            api_id=api.id,
+                            status_code=status_code,
+                            schema=None,
+                            content_type=None,
+                            description=response.get("description")
+                        )
+                        print(f"  - Response: {status_code} (no schema)")
+                        self.db.add(api_response)
+                        continue
+
                     for content_type, schema_info in content_map.items():
                         schema = schema_info.get("schema", {})
 
                         # -------------------------------
-                        # Resolve $ref (if needed)
+                        # Resolve $ref
                         # -------------------------------
                         ref = schema.get("$ref")
                         if ref:
                             schema_name = ref.split("/")[-1]
                             resolved_schema = self._resolve_schema_ref(ref, swagger_json)
-
-                            # Mark as producer
                             schema_producers.setdefault(schema_name, []).append(api.id)
                         else:
                             resolved_schema = schema
@@ -217,22 +228,23 @@ class APIParserService:
                                 schema_producers.setdefault(schema_name, []).append(api.id)
 
                         # -------------------------------
-                        # Extract nested refs (IMPORTANT)
+                        # Extract nested refs
                         # -------------------------------
                         refs = self._extract_refs(resolved_schema)
                         for ref_name in refs:
                             schema_producers.setdefault(ref_name, []).append(api.id)
 
                         # -------------------------------
-                        # Store FULL response
+                        # Store response
                         # -------------------------------
                         api_response = APIResponse(
                             api_id=api.id,
                             status_code=status_code,
                             schema=resolved_schema,
-                            content_type=content_type
+                            content_type=content_type,
+                            description=response.get("description")
                         )
-                        print(f"  - Response: {status_code} (content-type: {content_type}, type: {resolved_schema.get('type')})")
+                        print(f"  - Response: {status_code} (content-type: {content_type})")
                         self.db.add(api_response)
                 # -------------------------------
                 # Auth Attach
