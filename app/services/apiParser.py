@@ -1,3 +1,4 @@
+import httpx
 from app.models.apiParser import (
     Project,
     SwaggerDocument,
@@ -42,6 +43,21 @@ class APIParserService:
         except Exception as e:
             raise Exception("Error fetching project: " + str(e))
         
+    async def fetch_swagger(self, swagger_url: str) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(swagger_url)
+                response.raise_for_status()
+        except httpx.RequestError as e:
+            raise ValueError(f"Failed to connect: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise ValueError(f"HTTP error: {e.response.status_code}")
+
+        try:
+            return response.json()
+        except Exception:
+            raise ValueError("Invalid JSON response (not a Swagger doc)")
+        
     async def parse_swagger(self, swagger_json: dict, project_id: str):
         """
         Hybrid Swagger parser:
@@ -72,10 +88,7 @@ class APIParserService:
             raw_json=swagger_json
         )
         self.db.add(swagger_doc)
-        self.db.flush()
-
-        components = swagger_json.get("components", {})
-        schemas = components.get("schemas", {})
+        await self.db.flush()
 
         # -------------------------------
         # 3. Authentication Handling
@@ -97,7 +110,6 @@ class APIParserService:
                     continue
 
                 api = API(
-                    project_id=project_id,
                     swagger_id=swagger_doc.id,
                     operation_id = details.get("operationId"),
                     path=path,
@@ -108,7 +120,7 @@ class APIParserService:
                 )
                 print(f"Parsing API: {method.upper()} {path}")
                 self.db.add(api)
-                self.db.flush()
+                await self.db.flush()
 
                 api_key = f"{method.upper()} {path}"
 
@@ -217,7 +229,6 @@ class APIParserService:
                         api_response = APIResponse(
                             api_id=api.id,
                             status_code=status_code,
-                            description=response.get("description"),
                             schema=resolved_schema,
                             content_type=content_type
                         )
@@ -264,8 +275,8 @@ class APIParserService:
         # Save dependencies
         for dep in dependencies:
             self.db.add(APIDependency(
-                api_id=dep["api_id"],
-                depends_on_api_id=dep["depends_on_api_id"],
+                source_api_id=dep["api_id"],
+                target_api_id=dep["depends_on_api_id"],
                 dependency_type=dep["type"]
             ))
 
@@ -277,17 +288,21 @@ class APIParserService:
 
             for dep in llm_dependencies:
                 self.db.add(APIDependency(
-                    api_id=dep["api_id"],
-                    depends_on_api_id=dep["depends_on_api_id"],
+                    source_api_id=dep["api_id"],
+                    target_api_id=dep["depends_on_api_id"],
                     dependency_type="llm"
                 ))
 
         # -------------------------------
         # 7. Commit
         # -------------------------------
-        self.db.commit()
+        await self.db.commit()
 
     def _attach_auth(self, api, details, swagger_json, auth_schemes):
+        """
+        Attach correct auth to API
+        """
+
         security = details.get("security", swagger_json.get("security", []))
 
         if not security:
@@ -297,17 +312,47 @@ class APIParserService:
             for sec_name in sec.keys():
                 scheme = auth_schemes.get(sec_name)
 
+                # Skip if scheme not found
                 if not scheme:
+                    continue
+
+                auth_type = scheme.get("type")
+
+                # Skip invalid or incomplete auth
+                if not auth_type:
+                    continue
+
+                config = {}
+
+                # apiKey
+                if auth_type == "apiKey":
+                    if not scheme.get("name") or not scheme.get("in"):
+                        continue
+
+                    config = {
+                        "in": scheme.get("in"),
+                        "name": scheme.get("name"),
+                    }
+
+                # bearer token
+                elif auth_type == "bearer":
+                    config = {
+                        "in": "header",
+                        "name": "Authorization",
+                        "scheme": "Bearer"
+                    }
+
+                # Skip oauth2 for MVP (incomplete handling)
+                elif auth_type == "oauth2":
+                    continue
+
+                else:
                     continue
 
                 api_auth = APIAuth(
                     api_id=api.id,
-                    auth_type=scheme.get("type"),
-                    config={
-                        "scheme": scheme.get("scheme"),
-                        "in": scheme.get("in"),
-                        "name": scheme.get("name"),
-                    }
+                    auth_type=auth_type,
+                    config=config
                 )
 
                 self.db.add(api_auth)
@@ -315,32 +360,39 @@ class APIParserService:
             
     def _extract_auth_schemes(self, swagger_json: dict):
         """
-        Extract authentication schemes from Swagger/OpenAPI
+        Extract and normalize authentication schemes
         """
 
         auth_schemes = {}
 
         # OpenAPI 3
-        components = swagger_json.get("components", {})
-        security_schemes = components.get("securitySchemes", {})
+        security_schemes = swagger_json.get("components", {}).get("securitySchemes", {})
 
         # Swagger 2 fallback
         if not security_schemes:
             security_schemes = swagger_json.get("securityDefinitions", {})
 
         for name, scheme in security_schemes.items():
-            auth_type = scheme.get("type")
+            scheme_type = scheme.get("type")
 
-            auth_schemes[name] = {
-                "type": auth_type,                  # apiKey / http / oauth2
-                "scheme": scheme.get("scheme"),     # bearer / basic
-                "in": scheme.get("in"),             # header / query
-                "name": scheme.get("name"),         # header name (e.g. Authorization)
-                "flows": scheme.get("flows"),       # OAuth2
+            # 🚨 Skip invalid schemes
+            if not scheme_type:
+                continue
+
+            normalized = {
+                "type": scheme_type,              # apiKey / http / oauth2
+                "in": scheme.get("in"),
+                "name": scheme.get("name"),
+                "scheme": scheme.get("scheme"),
             }
 
+            if scheme_type == "http" and scheme.get("scheme") == "bearer":
+                normalized["type"] = "bearer"
+                normalized["name"] = "Authorization"
+
+            auth_schemes[name] = normalized
+
         return auth_schemes
-    
 
     def _extract_request_body(self, details, swagger_json):
         """
@@ -395,3 +447,24 @@ class APIParserService:
             }
 
         return {}
+    
+    def _extract_refs(self, schema):
+        """
+        Recursively extract all $ref schema names from a schema
+        """
+        refs = []
+
+        if isinstance(schema, dict):
+            for key, value in schema.items():
+                if key == "$ref" and isinstance(value, str):
+                    # Extract schema name from ref
+                    schema_name = value.split("/")[-1]
+                    refs.append(schema_name)
+                else:
+                    refs.extend(self._extract_refs(value))
+
+        elif isinstance(schema, list):
+            for item in schema:
+                refs.extend(self._extract_refs(item))
+
+        return refs
