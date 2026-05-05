@@ -36,7 +36,7 @@ async def get_project(project_id: int, apiParseService: APIParserService = Depen
 async def parse_swagger(parserDetails: ParserDetails, apiParseService: APIParserService = Depends(get_api_parser_service)):
     try:
         swaggerJsonData = await apiParseService.fetch_swagger(str(parserDetails.swagger_url))
-        swaggerData = await apiParseService.parse_swagger(swaggerJsonData, parserDetails.project_id)
+        await apiParseService.parse_swagger(swaggerJsonData, parserDetails.project_id)
         return {"message": "Swagger parsed successfully"}
     except Exception as e:
         print("Error parsing swagger: ", str(e))

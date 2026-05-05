@@ -69,13 +69,13 @@ class API(Base):
 
     dependencies_source = relationship(
         "APIDependency",
-        foreign_keys="APIDependency.source_api_id",
+        foreign_keys="APIDependency.api_id",
         back_populates="source_api"
     )
 
     dependencies_target = relationship(
         "APIDependency",
-        foreign_keys="APIDependency.target_api_id",
+        foreign_keys="APIDependency.depends_on_api_id",
         back_populates="target_api"
     )
 
@@ -136,20 +136,20 @@ class APIDependency(Base):
     __tablename__ = "api_dependencies"
 
     id = Column(Integer, primary_key=True, index=True)
-    source_api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
-    target_api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
+    api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
+    depends_on_api_id = Column(Integer, ForeignKey("apis.id"), nullable=False)
     dependency_type = Column(String(50))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
 
     source_api = relationship(
         "API",
-        foreign_keys=[source_api_id],
+        foreign_keys=[api_id],
         back_populates="dependencies_source"
     )
 
     target_api = relationship(
         "API",
-        foreign_keys=[target_api_id],
+        foreign_keys=[depends_on_api_id],
         back_populates="dependencies_target"
     )
 

@@ -285,30 +285,30 @@ class APIParserService:
                             })
 
         # Save dependencies
-        for dep in dependencies:
-            self.db.add(APIDependency(
-                source_api_id=dep["api_id"],
-                target_api_id=dep["depends_on_api_id"],
-                dependency_type=dep["type"]
-            ))
+        # for dep in dependencies:
+        #     self.db.add(APIDependency(
+        #         api_id=dep["api_id"],
+        #         depends_on_api_id=dep["depends_on_api_id"],
+        #         dependency_type=dep["type"]
+        #     ))
 
         # -------------------------------
         # 6. LLM-Based Dependency Enhancement (Optional)
         # -------------------------------
         if self.enable_llm:
-            llm_dependencies = self._infer_dependencies_with_llm(api_map)
+            llm_dependencies = self._infer_dependencies_with_llm(api_map,dependencies)
 
-            for dep in llm_dependencies:
-                self.db.add(APIDependency(
-                    source_api_id=dep["api_id"],
-                    target_api_id=dep["depends_on_api_id"],
-                    dependency_type="llm"
-                ))
+            # for dep in llm_dependencies:
+            #     self.db.add(APIDependency(
+            #         api_id=dep["api_id"],
+            #         depends_on_api_id=dep["depends_on_api_id"],
+            #         dependency_type="llm"
+            #     ))
 
         # -------------------------------
         # 7. Commit
         # -------------------------------
-        await self.db.commit()
+        # await self.db.commit()
 
     def _attach_auth(self, api, details, swagger_json, auth_schemes):
         """
