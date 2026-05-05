@@ -6,12 +6,13 @@ from app.models.apiParser import (
     APIParameter,
     APIResponse,
     APIDependency,
-    APIAuth
+    APIAuth,
 )
+from app.services.aiServices import infer_dependencies_with_llm
 
 class APIParserService:
     def __init__(self, db_session):
-        self.enable_llm = False  # Toggle LLM-based inference
+        self.enable_llm = True  # Toggle LLM-based inference
         self.db = db_session
 
 
@@ -125,7 +126,7 @@ class APIParserService:
                 api_key = f"{method.upper()} {path}"
 
                 api_map[api_key] = {
-                    "api": api,
+                    "api_id": api.id,
                     "details": details
                 }
 
@@ -295,20 +296,25 @@ class APIParserService:
         # -------------------------------
         # 6. LLM-Based Dependency Enhancement (Optional)
         # -------------------------------
+        print(f"----------------------------------------")
+        print(f"Initial Detected Dependencies: {dependencies}")
+        print(f"----------------------------------------")
+        print(f"LLM-Based Dependency Inference Enabled: {api_map}")
+        print(f"==========================================")
         if self.enable_llm:
-            llm_dependencies = self._infer_dependencies_with_llm(api_map,dependencies)
+            llm_dependencies = infer_dependencies_with_llm(api_map,dependencies)
 
-            # for dep in llm_dependencies:
-            #     self.db.add(APIDependency(
-            #         api_id=dep["api_id"],
-            #         depends_on_api_id=dep["depends_on_api_id"],
-            #         dependency_type="llm"
-            #     ))
+            for dep in llm_dependencies:
+                self.db.add(APIDependency(
+                    api_id=dep["api_id"],
+                    depends_on_api_id=dep["depends_on_api_id"],
+                    dependency_type="llm"
+                ))
 
         # -------------------------------
         # 7. Commit
         # -------------------------------
-        # await self.db.commit()
+        await self.db.commit()
 
     def _attach_auth(self, api, details, swagger_json, auth_schemes):
         """
