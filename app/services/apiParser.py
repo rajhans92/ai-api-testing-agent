@@ -7,6 +7,7 @@ from app.models.apiParser import (
     APIResponse,
     APIDependency,
     APIAuth,
+    ParameterMapping
 )
 from app.services.aiServices import infer_dependencies_with_llm
 
