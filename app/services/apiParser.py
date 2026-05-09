@@ -10,6 +10,7 @@ from app.models.apiParser import (
     ParameterMapping
 )
 from app.services.aiServices import infer_dependencies_with_llm
+from app.agents.apiParserAgent import executeAPIParserAgent
 
 class APIParserService:
     def __init__(self, db_session):
@@ -60,6 +61,10 @@ class APIParserService:
         except Exception:
             raise ValueError("Invalid JSON response (not a Swagger doc)")
         
+    async def executeAgent(self, swaggerJson: dict, projectId: str):
+        swaggerId = await self.parse_swagger(swaggerJson, projectId)
+        await executeAPIParserAgent(swaggerId)
+
     async def parse_swagger(self, swagger_json: dict, project_id: str):
         """
         Hybrid Swagger parser:
