@@ -8,7 +8,8 @@ from sqlalchemy import (
     Text,
     Boolean,
     ForeignKey,
-    TIMESTAMP
+    TIMESTAMP,
+    TEXT
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -41,7 +42,6 @@ class SwaggerDocument(Base):
     raw_json = Column(JSONB)
     parsed_at = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
-
     project = relationship("Project", back_populates="swagger_documents")
     apis = relationship("API", back_populates="swagger_documents")
 
@@ -55,6 +55,7 @@ class API(Base):
     id = Column(Integer, primary_key=True, index=True)
     swagger_id = Column(Integer, ForeignKey("swagger_documents.id"), nullable=False)
     operation_id = Column(String(255))
+    unique_path = TEXT
     method = Column(String(10))
     path = Column(Text)
     summary = Column(Text)
