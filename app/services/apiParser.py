@@ -62,15 +62,16 @@ class APIParserService:
             raise ValueError("Invalid JSON response (not a Swagger doc)")
         
     async def executeAgent(self, swaggerJson: dict, projectId: str):
-        swaggerId = await self.parse_swagger(swaggerJson, projectId)
-        await executeAPIParserAgent(swaggerId)
+        try:
+            swaggerId = await self.parse_swagger(swaggerJson, projectId)
+            await executeAPIParserAgent(swaggerId,self.db)
+        except Exception as e:
+            raise Exception("Error executing API Parser Agent: " + str(e))
 
     async def parse_swagger(self, swagger_json: dict, project_id: str):
         """
         Hybrid Swagger parser:
         - Rule-based extraction (deterministic)
-        - Dependency detection (schema + param level)
-        - LLM hook for advanced inference
         """
 
         # -------------------------------
@@ -89,6 +90,8 @@ class APIParserService:
         # -------------------------------
         # 2. Store Swagger Document
         # -------------------------------
+        swagger_id = None
+
         swagger_doc = SwaggerDocument(
             project_id=project_id,
             version=version, # get version from database. add +1 for increment
@@ -102,23 +105,22 @@ class APIParserService:
         # -------------------------------
         auth_schemes = self._extract_auth_schemes(swagger_json)
         print(f"Extracted Auth Schemes: {auth_schemes}")
-
+        swagger_id = swagger_doc.id
         # -------------------------------
         # 4. Parse APIs
         # -------------------------------
-        api_map = {}
-        schema_producers = {}
-        param_index = {}
 
         for path, methods in swagger_json["paths"].items():
             for method, details in methods.items():
 
                 if method.upper() not in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
                     continue
+                api_key = f"{method.upper()}_{path}"
 
                 api = API(
                     swagger_id=swagger_doc.id,
                     operation_id = details.get("operationId"),
+                    unique_path= api_key,
                     path=path,
                     method=method.upper(),
                     summary=details.get("summary"),
@@ -128,13 +130,6 @@ class APIParserService:
                 print(f"Parsing API: {method.upper()} {path}")
                 self.db.add(api)
                 await self.db.flush()
-
-                api_key = f"{method.upper()} {path}"
-
-                api_map[api_key] = {
-                    "api_id": api.id,
-                    "details": details
-                }
 
                 # -------------------------------
                 # Parameters
@@ -155,9 +150,6 @@ class APIParserService:
                     print(f"  - Parameter: {param_name} (in: {param.get('in')}, type: {schema.get('type')})")
                     self.db.add(api_param)
 
-                    # Index for dependency detection
-                    param_index.setdefault(param_name.lower(), []).append(api.id)
-
                 # -------------------------------
                 # Request Body
                 # -------------------------------
@@ -171,8 +163,6 @@ class APIParserService:
                     if ref:
                         schema_name = ref.split("/")[-1]
 
-                        # Track dependency
-                        param_index.setdefault(schema_name.lower(), []).append(api.id)
                         # OPTIONAL: resolve schema manually
                         resolved_schema = self._resolve_schema_ref(ref, swagger_json)
                     else:
@@ -219,7 +209,6 @@ class APIParserService:
                         if ref:
                             schema_name = ref.split("/")[-1]
                             resolved_schema = self._resolve_schema_ref(ref, swagger_json)
-                            schema_producers.setdefault(schema_name, []).append(api.id)
                         else:
                             resolved_schema = schema
 
@@ -232,14 +221,12 @@ class APIParserService:
 
                             if item_ref:
                                 schema_name = item_ref.split("/")[-1]
-                                schema_producers.setdefault(schema_name, []).append(api.id)
+                                
 
                         # -------------------------------
                         # Extract nested refs
                         # -------------------------------
                         refs = self._extract_refs(resolved_schema)
-                        for ref_name in refs:
-                            schema_producers.setdefault(ref_name, []).append(api.id)
 
                         # -------------------------------
                         # Store response
@@ -258,69 +245,8 @@ class APIParserService:
                 # -------------------------------
                 self._attach_auth(api, details, swagger_json, auth_schemes)
 
-        # -------------------------------
-        # 5. Rule-Based Dependency Detection
-        # -------------------------------
-
-        dependencies = []
-
-        print(f"Schema Producers: {schema_producers}")
-        print(f"Parameter Index: {param_index}")
-        # Schema-based dependency
-        for schema_name, producers in schema_producers.items():
-            consumers = param_index.get(schema_name.lower(), [])
-
-            for consumer_api in consumers:
-                for producer_api in producers:
-                    if consumer_api != producer_api:
-                        dependencies.append({
-                            "api_id": consumer_api,
-                            "depends_on_api_id": producer_api,
-                            "type": "schema"
-                        })
-
-        # Param-name based dependency (weak but useful)
-        for param_name, api_ids in param_index.items():
-            if len(api_ids) > 1:
-                for consumer in api_ids:
-                    for producer in api_ids:
-                        if consumer != producer:
-                            dependencies.append({
-                                "api_id": consumer,
-                                "depends_on_api_id": producer,
-                                "type": "param"
-                            })
-
-        # Save dependencies
-        # for dep in dependencies:
-        #     self.db.add(APIDependency(
-        #         api_id=dep["api_id"],
-        #         depends_on_api_id=dep["depends_on_api_id"],
-        #         dependency_type=dep["type"]
-        #     ))
-
-        # -------------------------------
-        # 6. LLM-Based Dependency Enhancement (Optional)
-        # -------------------------------
-        print(f"----------------------------------------")
-        print(f"Initial Detected Dependencies: {dependencies}")
-        print(f"----------------------------------------")
-        print(f"LLM-Based Dependency Inference Enabled: {api_map}")
-        print(f"==========================================")
-        if self.enable_llm:
-            llm_dependencies = infer_dependencies_with_llm(api_map,dependencies)
-
-            for dep in llm_dependencies:
-                self.db.add(APIDependency(
-                    api_id=dep["api_id"],
-                    depends_on_api_id=dep["depends_on_api_id"],
-                    dependency_type="llm"
-                ))
-
-        # -------------------------------
-        # 7. Commit
-        # -------------------------------
         await self.db.commit()
+        return swagger_id
 
     def _attach_auth(self, api, details, swagger_json, auth_schemes):
         """
