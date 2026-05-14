@@ -64,7 +64,7 @@ class APIParserService:
     async def executeAgent(self, swaggerJson: dict, projectId: str):
         try:
             swaggerId = await self.parse_swagger(swaggerJson, projectId)
-            # await executeAPIParserAgent(swaggerId,self.db)
+            await executeAPIParserAgent(swaggerId,self.db)
         except Exception as e:
             raise Exception("Error executing API Parser Agent: " + str(e))
 
