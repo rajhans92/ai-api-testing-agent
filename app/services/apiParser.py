@@ -64,7 +64,7 @@ class APIParserService:
     async def executeAgent(self, swaggerJson: dict, projectId: str):
         try:
             swaggerId = await self.parse_swagger(swaggerJson, projectId)
-            await executeAPIParserAgent(swaggerId,self.db)
+            # await executeAPIParserAgent(swaggerId,self.db)
         except Exception as e:
             raise Exception("Error executing API Parser Agent: " + str(e))
 
@@ -159,15 +159,15 @@ class APIParserService:
                 for content_type, schema_info in content.items():
                     schema = schema_info.get("schema", {})
 
-                    ref = schema.get("$ref")
-                    if ref:
-                        schema_name = ref.split("/")[-1]
+                    # ref = schema.get("$ref")
+                    # if ref:
+                    #     schema_name = ref.split("/")[-1]
 
-                        # OPTIONAL: resolve schema manually
-                        resolved_schema = self._resolve_schema_ref(ref, swagger_json)
-                    else:
-                        resolved_schema = schema
-
+                    #     # OPTIONAL: resolve schema manually
+                    #     resolved_schema = self._resolve_schema_refs(schema, swagger_json)
+                    # else:
+                    #     resolved_schema = schema
+                    resolved_schema = self._resolve_schema_refs(schema, swagger_json)
                     api_param = APIParameter(
                         api_id=api.id,
                         name="body",
@@ -205,12 +205,14 @@ class APIParserService:
                         # -------------------------------
                         # Resolve $ref
                         # -------------------------------
-                        ref = schema.get("$ref")
-                        if ref:
-                            schema_name = ref.split("/")[-1]
-                            resolved_schema = self._resolve_schema_ref(ref, swagger_json)
-                        else:
-                            resolved_schema = schema
+                        # ref = schema.get("$ref")
+                        # if ref:
+                        #     schema_name = ref.split("/")[-1]
+                        #     resolved_schema = self._resolve_schema_refs(schema, swagger_json)
+                        # else:
+                        #     resolved_schema = schema
+
+                        resolved_schema = self._resolve_schema_refs(schema, swagger_json)
 
                         # -------------------------------
                         # Handle array schemas
@@ -364,21 +366,100 @@ class APIParserService:
                     }
                 }
         return {}
-    
-    def _resolve_schema_ref(self, ref, swagger_json):
+        
+    def _resolve_schema_refs(self, obj, swagger_json, visited=None):
         """
-        Resolve local $ref like:
-        #/components/schemas/User
+        Recursively resolve ALL $ref occurrences
+        inside Swagger/OpenAPI schemas.
         """
-        parts = ref.strip("#/").split("/")
-        ref_obj = swagger_json
 
-        for part in parts:
-            ref_obj = ref_obj.get(part, {})
+        if visited is None:
+            visited = set()
 
-        return ref_obj
+        # -----------------------------------
+        # Handle dict
+        # -----------------------------------
+        if isinstance(obj, dict):
+
+            # -----------------------------------
+            # Resolve direct $ref
+            # -----------------------------------
+            if "$ref" in obj:
+
+                ref = obj["$ref"]
+
+                # Prevent circular recursion
+                if ref in visited:
+                    return {"$ref": ref}
+
+                visited.add(ref)
+
+                # -----------------------------------
+                # Resolve path safely
+                # -----------------------------------
+                parts = ref.strip("#/").split("/")
+
+                resolved = swagger_json
+
+                for part in parts:
+
+                    if not isinstance(resolved, dict):
+                        print(f"Invalid ref path: {ref}")
+                        return obj
+
+                    resolved = resolved.get(part)
+
+                    if resolved is None:
+                        print(f"Ref not found: {ref}")
+                        return obj
+
+                # -----------------------------------
+                # Merge sibling fields
+                # -----------------------------------
+                merged = {
+                    **resolved,
+                    **{k: v for k, v in obj.items() if k != "$ref"}
+                }
+
+                return self._resolve_schema_refs(
+                    merged,
+                    swagger_json,
+                    visited.copy()
+                )
+
+            # -----------------------------------
+            # Resolve child keys recursively
+            # -----------------------------------
+            resolved_dict = {}
+
+            for key, value in obj.items():
+                resolved_dict[key] = self._resolve_schema_refs(
+                    value,
+                    swagger_json,
+                    visited.copy()
+                )
+
+            return resolved_dict
+
+        # -----------------------------------
+        # Handle list
+        # -----------------------------------
+        elif isinstance(obj, list):
+
+            return [
+                self._resolve_schema_refs(
+                    item,
+                    swagger_json,
+                    visited.copy()
+                )
+                for item in obj
+            ]
+
+        # -----------------------------------
+        # Primitive values
+        # -----------------------------------
+        return obj
     
-  
     def _extract_response_content(self, response):
         """
         Normalize Swagger2 and OpenAPI3 response formats
