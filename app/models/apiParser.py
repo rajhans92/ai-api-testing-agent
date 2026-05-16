@@ -55,7 +55,7 @@ class API(Base):
     id = Column(Integer, primary_key=True, index=True)
     swagger_id = Column(Integer, ForeignKey("swagger_documents.id"), nullable=False)
     operation_id = Column(String(255))
-    unique_path = TEXT
+    unique_path = Column(Text)
     method = Column(String(10))
     path = Column(Text)
     summary = Column(Text)
