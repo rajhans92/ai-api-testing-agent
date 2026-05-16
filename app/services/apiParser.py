@@ -63,8 +63,9 @@ class APIParserService:
         
     async def executeAgent(self, swaggerJson: dict, projectId: str):
         try:
+            # swaggerId = 1
             swaggerId = await self.parse_swagger(swaggerJson, projectId)
-            # await executeAPIParserAgent(swaggerId,self.db)
+            await executeAPIParserAgent(swaggerId,self.db)
         except Exception as e:
             raise Exception("Error executing API Parser Agent: " + str(e))
 
@@ -156,28 +157,26 @@ class APIParserService:
                 request_body = self._extract_request_body(details, swagger_json)
                 content = request_body.get("content", {})
 
-                for content_type, schema_info in content.items():
-                    schema = schema_info.get("schema", {})
+                schema_info = (
+                    content.get("application/json")
+                    or next(iter(content.values()), {})
+                )
 
-                    # ref = schema.get("$ref")
-                    # if ref:
-                    #     schema_name = ref.split("/")[-1]
+                schema = schema_info.get("schema", {})
 
-                    #     # OPTIONAL: resolve schema manually
-                    #     resolved_schema = self._resolve_schema_refs(schema, swagger_json)
-                    # else:
-                    #     resolved_schema = schema
-                    resolved_schema = self._resolve_schema_refs(schema, swagger_json)
-                    api_param = APIParameter(
-                        api_id=api.id,
-                        name="body",
-                        location="body",
-                        required=request_body.get("required", False),
-                        type=schema.get("type"),
-                        schema =resolved_schema
-                    )
-                    print(f"  - Request Body: (content-type: {content_type}, type: {schema.get('type')})")
-                    self.db.add(api_param)
+                resolved_schema = self._resolve_schema_refs(schema, swagger_json)
+
+                api_param = APIParameter(
+                    api_id=api.id,
+                    name="body",
+                    location="body",
+                    required=request_body.get("required", False),
+                    type=resolved_schema.get("type"),
+                    schema=resolved_schema
+                )
+
+                print("  - Request Body Added")
+                self.db.add(api_param)
 
                 # -------------------------------
                 # Responses
