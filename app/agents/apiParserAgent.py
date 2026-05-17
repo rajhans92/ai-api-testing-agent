@@ -21,6 +21,7 @@ llm = init_chat_model(model=LLM_MODEL, api_key=OPENAI_API_KEY)
 class State(TypedDict):
     swaggerId: int
     db: Session
+    setOfApisWithDependency: dict
 
 
 async def createDependencyGraph(state: State):
@@ -45,11 +46,7 @@ async def createDependencyGraph(state: State):
         print(f"Fetched {len(apiList)} APIs for swaggerId: {swaggerId}")
         sourceApiDetiails= {}
         setOfDependency = {}
-        run = 0
         for api_obj, param_obj in apiList:
-            if(run >= 5):
-                break
-            run += 1
             sourceApiDetiails = {
                 "sourceApiId": api_obj.id,
                 "unique_path": api_obj.unique_path,
@@ -94,24 +91,22 @@ async def createDependencyGraph(state: State):
                         "description": api_depend_obj.description,
                         "response_schema": response_obj.schema
                     }
-                    # print(f"Dependent API Details: {setOfDependency[api_depend_obj.unique_path]}")
-                #     print(f" unique_path = {api_depend_obj.unique_path}")
-                # print (f" Count = {len(setOfDependency)}")
-                # print("--------------------------------------------------")
-                # print("---------------------------------------------------")
             prompt = loadPrompt("dependencyPrompt.txt", sourceApiDetails=sourceApiDetiails, setOfDependency=setOfDependency)
             print(f"Prompt for API {api_obj.id}: {prompt}")
             response = await llm.ainvoke(prompt)
 
             print(f"Dependency graph for API {api_obj.id}")
             print(response.content)
-            print("--------------------------------------------------")
-            print("--------------------------------------------------")
-            print("--------------------------------------------------")
-                  
+            if response.content and isinstance(response.content, list) and len(response.content) > 0:
+                state["setOfApisWithDependency"][api_obj.id] = response.content
+            print("-----------------------------------------------------------------------------------------------")
+            print("-----------------------------------------------------------------------------------------------")
+            print("-----------------------------------------------------------------------------------------------")
+        return state["setOfApisWithDependency"]     
 
 async def executeApiAndTest(state: State):
-    # Execute APIs based on dependency graph and run tests, update state with results
+    print("Executing APIs and tests based on dependency graph...")
+    print(f"Set of APIs with dependencies: {state['setOfApisWithDependency']}")
     pass
 
 async def failerHandler(state: State):
@@ -132,9 +127,9 @@ apiParserGraph.add_node("failerHandler",failerHandler)
 
 # Add edges to connect nodes
 apiParserGraph.add_edge(START, "createDependencyGraph")
-apiParserGraph.add_edge("createDependencyGraph", END)
+apiParserGraph.add_edge("createDependencyGraph", "executeApiAndTest")
+apiParserGraph.add_edge("executeApiAndTest", END)
 
-# apiParserGraph.add_edge("createDependencyGraph", "executeApiAndTest")
 # apiParserGraph.add_edge("executeApiAndTest", "failerHandler")
 # apiParserGraph.add_edge("failerHandler", "reevaluateDependencyGraph")
 # apiParserGraph.add_edge("failerHandler", "executeApiAndTest")
