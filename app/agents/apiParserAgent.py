@@ -3,6 +3,7 @@ from langchain.chat_models import init_chat_model
 from typing_extensions import TypedDict
 from sqlalchemy.orm import Session
 from sqlalchemy import select,String
+import json
 from app.utils.config import (
     LLM_MODEL,
     OPENAI_API_KEY
@@ -15,6 +16,7 @@ from app.models.apiParser import (
 from app.services.promptService import (
     loadPrompt
 )
+from app.utils.llm_rate_limiter import wait_for_token_limit
 llm = init_chat_model(model=LLM_MODEL, api_key=OPENAI_API_KEY)
 
 # Graph state
@@ -46,7 +48,11 @@ async def createDependencyGraph(state: State):
         print(f"Fetched {len(apiList)} APIs for swaggerId: {swaggerId}")
         sourceApiDetiails= {}
         setOfDependency = {}
+        count = 0
         for api_obj, param_obj in apiList:
+            if count >= 5:
+                break
+            count += 1
             sourceApiDetiails = {
                 "sourceApiId": api_obj.id,
                 "unique_path": api_obj.unique_path,
@@ -93,16 +99,26 @@ async def createDependencyGraph(state: State):
                     }
             prompt = loadPrompt("dependencyPrompt.txt", sourceApiDetails=sourceApiDetiails, setOfDependency=setOfDependency)
             print(f"Prompt for API {api_obj.id}: {prompt}")
+
+            estimated_tokens = len(prompt) // 4
+            await wait_for_token_limit(estimated_tokens)
             response = await llm.ainvoke(prompt)
 
             print(f"Dependency graph for API {api_obj.id}")
             print(response.content)
-            if response.content and isinstance(response.content, list) and len(response.content) > 0:
-                state["setOfApisWithDependency"][api_obj.id] = response.content
+            if response.content:
+                dependencies = json.loads(response.content)
+            if isinstance(dependencies, list) and len(dependencies) > 0:
+                print(f"Setting dependency graph for API {api_obj.id} in state")
+
+                if "setOfApisWithDependency" not in state:
+                    state["setOfApisWithDependency"] = {}   
+
+                state["setOfApisWithDependency"][api_obj.id] = dependencies
             print("-----------------------------------------------------------------------------------------------")
             print("-----------------------------------------------------------------------------------------------")
             print("-----------------------------------------------------------------------------------------------")
-        return state["setOfApisWithDependency"]     
+        return state     
 
 async def executeApiAndTest(state: State):
     print("Executing APIs and tests based on dependency graph...")
